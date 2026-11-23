@@ -6,6 +6,21 @@ Ask a quick question, attach a document or image, and read formatted Markdown re
 
 Download the Windows executable from [GitHub Releases](https://github.com/nicklausFR/chatgpt-systray-companion/releases/latest).
 
+## Screenshots
+
+An example conversation with Markdown formatting and a generated file, using the English interface.
+
+<table>
+  <tr>
+    <th>Dark</th>
+    <th>Light</th>
+  </tr>
+  <tr>
+    <td><img src="docs/images/screenshot-dark.png" alt="English interface in dark mode, showing a Markdown response and a generated file" width="380"></td>
+    <td><img src="docs/images/screenshot-light.png" alt="English interface in light mode, showing the same conversation" width="380"></td>
+  </tr>
+</table>
+
 ## Features
 
 - System tray access, with no additional taskbar icon.
@@ -27,6 +42,24 @@ Download the Windows executable from [GitHub Releases](https://github.com/nickla
 
 Responses appear once generation finishes, allowing Markdown to be displayed fully formatted. Generation can be interrupted.
 
+## Language and appearance
+
+Open the gear menu at the bottom of the sidebar to change these settings:
+
+| Setting | Available choices | Menu |
+|---|---|---|
+| Interface language | French (`fr`) and English (`en`) | **Options → Language → Français / English** |
+| Appearance | Light, Dark and Automatic (Windows) | **Options → Appearance** |
+
+On first launch, the interface uses French on a French system and English
+otherwise. Appearance follows the Windows app theme by default. Automatic mode
+also follows Windows theme changes while the companion is running.
+
+Both preferences are saved locally and apply immediately, preserving the current
+conversation, draft and any response in progress. Interface language does not
+impose a language on your messages or the assistant's replies. Native Windows
+file dialogs use the Windows display language for their system controls.
+
 ## Requirements
 
 For the Windows executable:
@@ -37,9 +70,6 @@ For the Windows executable:
 - An internet connection.
 
 Python and Qt are included in the executable.
-
-The interface supports French and English. On first launch it uses French on a
-French system and English otherwise; appearance follows Windows by default.
 
 ## Getting started
 
@@ -94,12 +124,6 @@ clear the field to remove these preferences. The field is empty by default and
 saved locally. There is no built-in prompt prohibition on using tools
 or inspecting local files. Codex can create deliverables in a temporary workspace; actions
 requiring approval are not supported by this client.
-
-Language and appearance changes preserve the conversation, draft and any response
-in progress. Automatic appearance follows changes to the Windows app theme while
-the companion is running. Interface language does not impose a language on your
-messages or the assistant's replies. Windows native file dialogs use the Windows
-display language for their system controls.
 
 ## Attachments
 
