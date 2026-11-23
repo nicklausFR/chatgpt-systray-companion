@@ -77,7 +77,7 @@ from scroll_fade import ScrollFade
 
 APP_NAME = "ChatGPT Systray Companion"
 APP_EXECUTABLE = "chatgpt-systray-companion"
-APP_VERSION = "0.1.35"
+APP_VERSION = "0.1.36"
 CODEX_INSTALL_URL = "https://learn.chatgpt.com/docs/cli"
 COMPACT_WINDOW_HEIGHT = 240
 SIDEBAR_WIDTH = 48
@@ -2209,15 +2209,42 @@ class MainWindow(QMainWindow):
         ui_text(self.status_label, 'setToolTip', status)
         ui_text(self.tray_icon, 'setToolTip', f"{APP_NAME} — {status}\n{self.account_action.text()}")
 
-    def _show_from_tray(self) -> None:
+    def _show_window(self) -> None:
         self._auto_hide_timer.stop()
         self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def _show_from_tray(self) -> None:
+        self._show_window()
         if self._pending_error:
             error = self._pending_error
             self._pending_error = None
             QMessageBox.critical(self, APP_NAME, error)
+
+    def _show_response(self) -> None:
+        if self._quitting or self._native_dialog_open:
+            return
+        if self.isVisible() and not self.isMinimized() and self._has_active_window():
+            return
+        self._show_window()
+        if QApplication.platformName() != "windows" or self._pinned or self.isActiveWindow():
+            return
+
+        from ctypes import WinDLL, wintypes
+
+        set_window_pos = WinDLL("user32").SetWindowPos
+        set_window_pos.argtypes = (wintypes.HWND, wintypes.HWND, wintypes.INT, wintypes.INT,
+                                   wintypes.INT, wintypes.INT, wintypes.UINT)
+        set_window_pos.restype = wintypes.BOOL
+        HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+        SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
+        flags = SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+        window = self.winId()
+        # Windows peut garder le focus ailleurs. Ce passage dans le groupe des
+        # fenêtres épinglées remonte la fenêtre dans l'ordre d'affichage normal.
+        if set_window_pos(window, HWND_TOPMOST, 0, 0, 0, 0, flags):
+            set_window_pos(window, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
 
     def _toggle_from_tray(self) -> None:
         if self.isVisible():
@@ -2252,21 +2279,24 @@ class MainWindow(QMainWindow):
         if not self._quitting and not self._changing_pin and not self._pinned and self.isVisible():
             self._auto_hide_timer.start()
 
+    def _has_active_window(self) -> bool:
+        if self.isActiveWindow():
+            return True
+        active = QApplication.activeWindow()
+        if active is not None and active.isActiveWindow():
+            while active is not None:
+                if active is self:
+                    return True
+                active = active.parentWidget()
+        return False
+
     def _hide_if_unfocused(self) -> None:
         if self._quitting or self._changing_pin or self._pinned or self._native_dialog_open or not self.isVisible():
             return
-        if not QSystemTrayIcon.isSystemTrayAvailable() or self.isActiveWindow():
+        if not QSystemTrayIcon.isSystemTrayAvailable() or self._has_active_window():
             return
-        # Les menus, sélecteurs de fichiers et aperçus appartiennent à la fenêtre.
         if QApplication.activePopupWidget() is not None or QApplication.activeModalWidget() is not None:
             return
-        active = QApplication.activeWindow()
-        if active is not None and active.isActiveWindow():
-            owner = active
-            while owner is not None:
-                if owner is self:
-                    return
-                owner = owner.parentWidget()
         # Le clic sur l'icône de notification gère lui-même afficher/masquer.
         if self.tray_icon.geometry().contains(QCursor.pos()):
             return
@@ -2417,10 +2447,10 @@ class MainWindow(QMainWindow):
     def _append_assistant_delta(self, delta: str) -> None:
         self._assistant_text += delta
 
-    def _render_assistant_message(self, artifacts: list[GeneratedBundle] | None = None) -> None:
+    def _render_assistant_message(self, artifacts: list[GeneratedBundle] | None = None) -> bool:
         artifacts = artifacts or []
         if not self._assistant_text and not artifacts:
-            return
+            return False
         file_links = self.transcript.register_artifacts(artifacts)
         parsed = parse_response(self._assistant_text)
         markdown = parsed.markdown or tr("Fichiers prêts à être enregistrés.")
@@ -2507,16 +2537,19 @@ class MainWindow(QMainWindow):
             self.transcript.ensureCursorVisible()
         finally:
             self.transcript.setUpdatesEnabled(True)
+        return True
 
     def _turn_finished(self, status: str, error: str) -> None:
         artifacts = self.client.artifacts.deliveries() if status == "completed" and self.client.artifacts else []
-        self._render_assistant_message(artifacts)
+        rendered_response = self._render_assistant_message(artifacts)
         self._set_busy(False)
         if error:
             self._append_message(tr("Erreur"), error, QColor(ui_color("#dc2626")))
         elif status not in ("completed", "interrupted"):
             self._append_message(tr("État"), status, QColor(ui_color("#dc2626")))
         self.input.setFocus()
+        if status == "completed" and rendered_response:
+            self._show_response()
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy

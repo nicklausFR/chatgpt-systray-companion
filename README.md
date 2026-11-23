@@ -116,6 +116,7 @@ Codex desktop application, which depends on services of that application.
 The window returns to the system tray when it loses focus, unless pinned. Menus,
 file dialogs and image previews remain usable. Hiding the window preserves the
 current conversation and any response in progress while the application is running.
+The window comes forward when the response is ready.
 
 Options lets you save recurring instructions such as preferred language, tone or
 response length. Changes apply to subsequent messages in the current conversation

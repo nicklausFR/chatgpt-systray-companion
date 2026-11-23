@@ -62,6 +62,51 @@ class WindowBehaviorTests(unittest.TestCase):
         self.assertEqual(window.client.thread_id, "fixture")
         interrupted.assert_not_called()
 
+    def test_completed_response_reopens_hidden_window(self):
+        window = self.window
+        window._set_busy(True)
+        self.deactivate()
+        self.assertFalse(window.isVisible())
+
+        window.client._handle_message({
+            "method": "turn/completed",
+            "params": {
+                "threadId": "fixture",
+                "turn": {"status": "completed", "items": [{"type": "agentMessage", "text": "La réponse."}]},
+            },
+        })
+
+        QTest.qWait(200)
+        self.assertTrue(window.isVisible())
+        self.assertFalse(window.windowFlags() & Qt.WindowStaysOnTopHint)
+        self.assertIn("La réponse.", window.transcript.toPlainText())
+
+    def test_completed_response_raises_visible_window_only_when_inactive(self):
+        window = self.window
+        for active in (False, True):
+            with self.subTest(active=active):
+                window.client.message_delta.emit("La réponse.")
+                with patch.object(window, "isActiveWindow", return_value=active), \
+                     patch.object(QApplication, "activeWindow", return_value=None), \
+                     patch.object(window, "raise_") as raise_window, \
+                     patch.object(window, "activateWindow") as activate:
+                    window.client.turn_finished.emit("completed", "")
+                self.assertEqual(raise_window.call_count, int(not active))
+                self.assertEqual(activate.call_count, int(not active))
+
+    def test_incomplete_or_empty_turn_does_not_reopen_hidden_window(self):
+        window = self.window
+        window.hide()
+        for status, text, error in (
+            ("interrupted", "Réponse partielle.", ""),
+            ("failed", "", "La génération a échoué."),
+            ("completed", "", ""),
+        ):
+            with self.subTest(status=status):
+                window.client.message_delta.emit(text)
+                window.client.turn_finished.emit(status, error)
+                self.assertFalse(window.isVisible())
+
     def test_pin_replaces_close_and_enables_always_on_top_without_changing_geometry(self):
         window = self.window
         geometry = window.geometry()
