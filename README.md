@@ -1,6 +1,8 @@
 # ChatGPT Systray Companion
 
-Windows tray client for the standalone Codex app-server. Built with Python and PySide6, using JSON-RPC over stdio.
+Quick access to ChatGPT from the Windows system tray. Companion was created after the classic ChatGPT app was retired, as a lightweight option for everyday chats alongside the full Codex desktop workspace.
+
+Built with Python and PySide6, it connects to the standalone Codex app-server via JSON-RPC over stdio.
 
 [Windows releases](https://github.com/nicklausFR/chatgpt-systray-companion/releases) · [Codex CLI setup](https://learn.chatgpt.com/docs/cli)
 
