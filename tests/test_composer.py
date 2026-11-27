@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QTextCursor, QTextFormat
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
@@ -22,6 +22,7 @@ class ComposerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         settings = QSettings(str(Path(self.temp.name) / "settings.ini"), QSettings.IniFormat)
+        settings.setValue("language", "fr")
         settings.setValue("theme", "dark")
         with patch.object(app, "QSettings", return_value=settings), patch.object(app.AppServerClient, "launch"):
             self.window = app.MainWindow(Path(self.temp.name))
@@ -47,6 +48,38 @@ class ComposerTests(unittest.TestCase):
         arrow = icon.pixelColor(10, 6)
         self.assertGreater(arrow.alpha(), 150)
         self.assertGreater(arrow.lightness(), 140)
+
+    def test_compact_controls_below_the_composer_open_the_existing_menus(self):
+        window = self.window
+        window.resize(window.minimumWidth(), window.height())
+        window._account_ready("person@example.test")
+        model = {"model": "fixture", "displayName": "Modèle de test " * 8,
+                 "supportedReasoningEfforts": [{"reasoningEffort": value} for value in ("low", "high")]}
+        window.client.models = [model]
+        window.client._model = "fixture"
+        window.client._effort = "low"
+        window._populate_models([model])
+        QT.processEvents()
+        self.assertEqual(window.width(), window.minimumWidth())
+        self.assertLess(window.composer.geometry().bottom(), window.account_button.y())
+        self.assertLess(window.account_button.geometry().right(), window.model_button.x())
+        self.assertEqual(window.account_button.y(), window.model_button.y())
+        self.assertTrue(window.model_button.text().endswith("Faible  ▾"))
+        self.assertIn(model["displayName"], window.model_button.toolTip())
+        for button, menu in ((window.account_button, window.account_menu), (window.model_button, window.model_menu)):
+            with self.subTest(button=button.accessibleName()):
+                shown = []
+
+                def close_menu():
+                    shown.append(True)
+                    QTimer.singleShot(0, menu.close)
+
+                menu.aboutToShow.connect(close_menu)
+                QTest.mouseClick(button, Qt.LeftButton)
+                menu.aboutToShow.disconnect(close_menu)
+                self.assertEqual(shown, [True])
+        window._model_submenus["fixture"].actions()[1].trigger()
+        self.assertTrue(window.model_button.text().endswith("Élevée  ▾"))
 
     def test_growth_caps_at_five_lines_and_preserves_both_fades(self):
         window = self.window

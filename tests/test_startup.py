@@ -33,6 +33,7 @@ class StartupTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.settings = QSettings(str(Path(self.temp.name) / "settings.ini"), QSettings.IniFormat)
+        self.settings.setValue("language", "fr")
         self.settings_patch = patch.object(app, "QSettings", return_value=self.settings)
         self.settings_patch.start()
         self.windows = []
@@ -89,6 +90,49 @@ class StartupTests(unittest.TestCase):
             window._thread_ready()
             self.assertTrue(window.setup_panel.isHidden())
             self.assertTrue(window.input.isEnabled())
+
+    def test_account_menu_shows_the_identity_and_remaining_quota_windows(self):
+        window = self.window()
+        client = window.client
+        account = {"type": "chatgpt", "name": "Camille Exemple", "email": "person@example.test", "planType": "plus"}
+        with patch.object(client, "state", return_value=QProcess.Running), patch.object(client, "_write") as write:
+            client._account_response({"account": account})
+        self.assertEqual(window.account_button.text(), "Camille Exemple  ▾")
+        self.assertEqual(window.account_action.text(), "Camille Exemple · plus")
+        self.assertEqual(window.quota_actions[0].text(), "Chargement des quotas…")
+        request = next(call.args[0] for call in write.call_args_list if call.args[0]["method"] == "account/rateLimits/read")
+        codex = {"limitId": "codex", "primary": {"windowDurationMins": 300, "usedPercent": 24, "resetsAt": 1795806000},
+                 "secondary": {"windowDurationMins": 10080, "usedPercent": 11}}
+        client._handle_message({"id": request["id"], "result": {
+            "rateLimits": codex,
+            "rateLimitsByLimitId": {"codex": codex, "extra": {"limitName": "Extra", "primary": {"usedPercent": 125}}},
+        }})
+        first, second, extra = [action.text() for action in window.quota_actions]
+        self.assertIn("5 h · 76 % restants · Réinitialisation le ", first)
+        self.assertEqual(second, "7 j · 89 % restants")
+        self.assertEqual(extra, "Extra · Quota principal · 0 % restants")
+        client._handle_message({"method": "account/rateLimits/updated", "params": {"rateLimits": {
+            "limitId": "codex", "primary": {"windowDurationMins": 300, "usedPercent": 40},
+        }}})
+        self.assertEqual([action.text() for action in window.quota_actions],
+                         ["5 h · 60 % restants", second, extra])
+
+    def test_quota_failures_and_late_replies_do_not_interrupt_login_or_show_another_account(self):
+        window = self.window()
+        client = window.client
+        with patch.object(client, "state", return_value=QProcess.Running), patch.object(client, "_write") as write:
+            client._account_response({"account": {"type": "chatgpt", "email": "first@example.test"}})
+            first = write.call_args_list[0].args[0]["id"]
+            client._handle_message({"method": "account/updated", "params": {"authMode": "chatgpt"}})
+            client._account_response({"account": {"type": "chatgpt", "email": "second@example.test"}})
+            second = write.call_args.args[0]["id"]
+        self.assertEqual(window.account_button.text(), "second@example.test  ▾")
+        client._handle_message({"id": first, "result": {"rateLimits": {"primary": {"usedPercent": 10}}}})
+        self.assertEqual(window.quota_actions[0].text(), "Chargement des quotas…")
+        client._handle_message({"id": second, "error": {"code": -32601, "message": "Method not found"}})
+        self.assertEqual(window.quota_actions[0].text(), "Quotas indisponibles")
+        self.assertTrue(window.setup_panel.isHidden())
+        self.assertTrue(window.login_action.isEnabled())
 
     def test_retry_rechecks_and_resets_previous_protocol_state(self):
         window = self.window()

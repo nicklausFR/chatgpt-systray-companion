@@ -4,11 +4,11 @@ A compact Windows chat companion powered by Codex, available directly from your 
 
 Ask a quick question, attach a document or image, and read formatted Markdown responses in a small, adjustable window.
 
-Download the Windows executable from [GitHub Releases](https://github.com/nicklausFR/chatgpt-systray-companion/releases/latest).
+Download a packaged Windows version from [GitHub Releases](https://github.com/nicklausFR/chatgpt-systray-companion/releases/latest). To use the current source shown below, [run from source](#run-from-source) or [build the Windows executable](#build-the-windows-executable).
 
 ## Screenshots
 
-An example conversation with Markdown formatting and a generated file, using the English interface.
+The English interface in both themes, with a generated Markdown file, the history button on the left, and account and model controls beneath the message box.
 
 <table>
   <tr>
@@ -16,10 +16,14 @@ An example conversation with Markdown formatting and a generated file, using the
     <th>Light</th>
   </tr>
   <tr>
-    <td><img src="docs/images/screenshot-dark.png" alt="English interface in dark mode, showing a Markdown response and a generated file" width="380"></td>
-    <td><img src="docs/images/screenshot-light.png" alt="English interface in light mode, showing the same conversation" width="380"></td>
+    <td><img src="docs/images/screenshot-dark.png" alt="Dark theme showing the generated checklist, history button, and account and model controls" width="380"></td>
+    <td><img src="docs/images/screenshot-light.png" alt="Light theme showing the same conversation and controls" width="380"></td>
   </tr>
 </table>
+
+The account menu shows remaining quota percentages and reset times. The account and figures shown are examples.
+
+<img src="docs/images/screenshot-account-quotas.png" alt="Account menu with example five-hour and seven-day usage windows, remaining percentages, and reset times" width="400">
 
 ## Features
 
@@ -32,9 +36,12 @@ An example conversation with Markdown formatting and a generated file, using the
 - Markdown rendering, including headings, lists, tables, links and code blocks.
 - Copy each response as raw Markdown using its hover button or right-click menu.
 - Generate files, archives or complete folders, then save them through a Windows dialog.
+- Automatic local conversation history, including generated files and interrupted responses.
+- Restore a previous conversation in Companion or hand it over to the Codex desktop application.
 - Images fit the available response width; click to open the original resolution.
 - Document and image attachments through drag and drop, clipboard paste or the context menu.
-- Model and reasoning-level selection, with preferences remembered between launches.
+- Account identity and remaining Codex quotas below the message box, alongside the model and reasoning controls.
+- Model and reasoning preferences remembered between launches.
 - Persistent custom instructions, editable in Options and applied from the next message.
 - Integrated send and stop buttons.
 - Subtle scroll indicators and edge fades.
@@ -101,17 +108,20 @@ Codex desktop application, which depends on services of that application.
 | Insert a line break | Press **Shift + Enter** |
 | Stop a response | Click the stop button |
 | Copy a response as Markdown | Hover over its footer and click the overlapping-sheets icon, or right-click the response |
-| Save a generated file or folder | Click **Enregistrer** on its card and choose a destination |
-| Save any response as Markdown | Right-click the response and choose **Enregistrer la réponse…** |
+| Save a generated file or folder | Click **Save file…** or **Save folder…** on its card and choose a destination |
+| Save any response as Markdown | Right-click the response and choose **Save response…** |
 | Attach a file | Drag and drop, paste, or right-click |
-| Change model and reasoning | Use the model icon in the left sidebar |
+| View remaining Codex quotas or open account settings | Click the account name or email below the message box |
+| Change model and reasoning | Click the current model and reasoning level below the message box |
 | Set recurring instructions | Open the gear menu and choose **Instructions…** |
 | Change interface language | Open **Options → Langue / Language**, then choose **Français** or **English** |
 | Change appearance | Open **Options → Apparence / Appearance**, then choose **Clair / Light**, **Sombre / Dark**, or **Automatique / Automatic (Windows)** |
 | Start a new conversation | Click the square-and-pencil icon below the pin, or use the system tray context menu |
+| Restore or delete past conversations | Click the history clock in the left sidebar |
+| Hand a conversation over to Codex | Right-click the conversation and choose **Send to Codex** |
 | Keep the window open and on top | Click the pin icon in the left sidebar |
 | Hide the window | Click outside while unpinned, press **Esc**, or click the tray icon |
-| Exit the application | Choose **Quitter** from the system tray menu |
+| Exit the application | Choose **Quit** from the system tray menu |
 
 The window returns to the system tray when it loses focus, unless pinned. Menus,
 file dialogs and image previews remain usable. Hiding the window preserves the
@@ -123,8 +133,23 @@ response length. Changes apply to subsequent messages in the current conversatio
 without resetting it. Choose **Instructions…** in the Options menu to edit them;
 clear the field to remove these preferences. The field is empty by default and
 saved locally. There is no built-in prompt prohibition on using tools
-or inspecting local files. Codex can create deliverables in a temporary workspace; actions
+or inspecting local files. Codex can create deliverables in a local workspace. Actions
 requiring approval are not supported by this client.
+
+## Conversation history
+
+Companion saves sent messages, received response text, and generated files
+locally. After an unexpected exit, you can recover the last saved response text
+and the files already written to the conversation workspace.
+
+Click the history clock in the left sidebar and select a dated conversation to
+restore it in the Companion window and continue chatting. Tick one or more
+entries and choose **Delete selected…**, or use **Delete all…**. Deletion also
+removes the associated local archives.
+
+Right-click a conversation and choose **Send to Codex** to open a new chat in
+the Codex desktop application. Its draft points to the transcript and local
+files. Send the draft in Codex to continue there.
 
 ## Attachments
 
@@ -145,21 +170,21 @@ Ask for a file, archive, or folder containing several files. For example:
 
 > Create a folder called website with index.html, assets/style.css and script.js.
 
-The response displays a file card with an **Enregistrer** action. For a single file,
+The response displays a file card with a save action. For a single file,
 choose its name and location in the Windows Save As dialog. For a folder, choose
 the parent directory; the application creates the folder and its subfolders there.
 An existing folder is preserved and a numbered name is used for the new one.
 
-Codex creates actual files in a temporary workspace using its available tools.
+Codex creates actual files in the conversation workspace using its available tools.
 The application detects completed deliverables and copies their bytes unchanged;
 it does not impose a whitelist of file formats. A ZIP is an actual archive and can
 contain binary or text files. Generation depends on the tools available to Codex
 on the user's computer.
 
-Files remain temporary until you choose a destination. Cancelling the save dialog
-does not write to your chosen folder. Temporary workspaces are removed when the
-application exits; saved copies remain. You can also save a normal response as a
-Markdown file from its right-click menu.
+Generated files are archived with their response and can be saved again from
+the restored conversation. Copies exported to a folder of your choice remain
+available after you delete the conversation. You can also save a response as
+a Markdown file from its right-click menu.
 
 Attached originals are made available in the conversation workspace so they can
 be reused unchanged in generated files and archives.
@@ -169,6 +194,11 @@ be reused unchanged in generated files and archives.
 The application uses the local Codex engine and its authentication.
 
 Each user signs in with their own account and uses their own available models and usage limits. No API key is required when signing in with ChatGPT.
+
+Below the message box, the account control displays the signed-in account email
+when Codex provides it. Click it to see the remaining percentage for each
+reported usage window and its next reset time when available. Companion refreshes
+these figures when you open the menu and when Codex reports a usage update.
 
 ## Run from source
 
@@ -231,14 +261,7 @@ catalogs automatically. To validate without compiling, use `--check`.
 
 ## Current limitations
 
-- Conversations are temporary. Starting a new chat or quitting the application clears the current conversation.
-- Persistent history and direct handoff to the Codex desktop application are not implemented yet.
 - Standard text selection copies rendered content; use the response copy action to preserve Markdown syntax.
-
-## Planned improvements
-
-- Persistent local conversation history.
-- Continue a conversation in Codex.
 
 ## License
 

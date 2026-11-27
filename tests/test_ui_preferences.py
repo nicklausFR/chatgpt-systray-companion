@@ -62,6 +62,13 @@ class UiPreferencesTests(unittest.TestCase):
     def test_switch_language_live_preserves_generation_draft_markdown_and_account(self):
         window = self.window
         window._account_ready("person@example.test")
+        window.client.rate_limits_changed.emit({"codex": {"primary": {"windowDurationMins": 300, "usedPercent": 30}}}, False)
+        model = {"model": "fixture", "displayName": "Fixture",
+                 "supportedReasoningEfforts": [{"reasoningEffort": "low"}]}
+        window.client.models = [model]
+        window.client._model = "fixture"
+        window.client._effort = "low"
+        window._populate_models([model])
         window._append_message("Vous", "Question en français", QColor("#a8abb1"))
         markdown = "## Hello\n\n```python\nprint('Vous')\n```"
         window._assistant_text = markdown
@@ -74,6 +81,10 @@ class UiPreferencesTests(unittest.TestCase):
         self.assertEqual(window.new_action.text(), "New chat")
         self.assertEqual(window.account_menu.title(), "Account")
         self.assertEqual(window.account_action.text(), "person@example.test")
+        self.assertEqual(window.account_button.text(), "person@example.test  ▾")
+        self.assertEqual(window.quota_actions[0].text(), "5 h · 70% remaining")
+        self.assertEqual(window.model_button.text(), "Fixture · Low  ▾")
+        self.assertFalse(window.model_button.isEnabled())
         self.assertEqual(window.login_action.text(), "Sign in again…")
         self.assertEqual(window.instructions_action.text(), "Instructions…")
         self.assertEqual(window.theme_menu.title(), "Appearance")
@@ -90,6 +101,9 @@ class UiPreferencesTests(unittest.TestCase):
         self.assertEqual(response.frameFormat().property(app.RESPONSE_MARKDOWN_PROPERTY), markdown)
         self.choose(window.language_group, "fr")
         self.assertEqual(window.new_action.text(), "Nouvelle discussion")
+        self.assertEqual(window.account_button.text(), "person@example.test  ▾")
+        self.assertEqual(window.quota_actions[0].text(), "5 h · 70 % restants")
+        self.assertEqual(window.model_button.text(), "Fixture · Faible  ▾")
         self.assertEqual(window.status_label.text(), "Réponse en cours…")
         self.assertIn("Vous\nQuestion en français", window.transcript.toPlainText())
 
@@ -106,6 +120,7 @@ class UiPreferencesTests(unittest.TestCase):
         self.assertEqual(window.setup_title.text(), "Set up Codex")
         self.assertEqual(window.setup_message.text(), "Codex setup required")
         self.assertEqual(window.account_action.text(), "Codex unavailable")
+        self.assertEqual(window.account_button.text(), "Codex unavailable  ▾")
         self.assertEqual(row.detail.text(), "Text · 1 KB")
         self.assertEqual(row.icon.toolTip(), "Open file")
         dialog = app.InstructionsDialog("Préférence inchangée", window)

@@ -1,4 +1,4 @@
-"""Own the temporary files created by the assistant, independently of formats."""
+"""Manage the working files created by the assistant."""
 from __future__ import annotations
 
 import os
@@ -16,17 +16,18 @@ class ArtifactWorkspace:
         self.current: Path | None = None
         self._before = {}
 
-    def new_chat(self) -> Path:
-        self.current = self.root / uuid4().hex
-        (self.current / "exports").mkdir(parents=True)
-        (self.current / "inputs").mkdir()
+    def new_chat(self, directory: Path | None = None) -> Path:
+        current = directory if directory is not None else self.root / uuid4().hex
+        for folder in (current / "exports", current / "inputs"):
+            if folder.resolve() != folder.absolute():
+                raise OSError(str(folder))
+            folder.mkdir(parents=True, exist_ok=True)
+        self.current = current
         self._before = {}
         return self.current
 
-    def _files(self) -> dict[str, Path]:
-        if self.current is None:
-            return {}
-        exports = self.current / "exports"
+    @staticmethod
+    def files(exports: Path) -> dict[str, Path]:
         if exports.is_symlink() or exports.resolve() != exports.absolute() or not exports.is_dir():
             return {}
         found = {}
@@ -43,21 +44,38 @@ class ArtifactWorkspace:
                     continue
         return found
 
+    @staticmethod
+    def signatures(files: dict[str, Path]) -> dict[str, list[int]]:
+        signatures = {}
+        for key, file in files.items():
+            try:
+                info = file.stat()
+            except FileNotFoundError:
+                continue
+            signatures[key] = [info.st_size, info.st_mtime_ns]
+        return signatures
+
     def snapshot(self) -> None:
-        self._before = {key: (file.stat().st_size, file.stat().st_mtime_ns) for key, file in self._files().items()}
+        self._before = self.signatures(self.files(self.current / "exports")) if self.current else {}
 
     def deliveries(self) -> list[GeneratedBundle]:
-        files = self._files()
-        changed = {key for key, file in files.items()
-                   if self._before.get(key) != (file.stat().st_size, file.stat().st_mtime_ns)}
-        groups = sorted({key.split("/", 1)[0] for key in changed})
+        return self.collect(self.current / "exports", self._before) if self.current else []
+
+    @classmethod
+    def collect(cls, exports: Path, before: dict[str, list[int]] | None = None) -> list[GeneratedBundle]:
+        files = cls.files(exports)
+        if before is not None:
+            current = cls.signatures(files)
+            files = {key: files[key] for key in current}
+            groups = {key.split("/", 1)[0] for key, signature in current.items() if before.get(key) != signature}
+        else:
+            groups = {key.split("/", 1)[0] for key in files}
         bundles = []
-        root = self.current / "exports" if self.current else self.root
-        for group in groups:
+        for group in sorted(groups):
             if group in files:
-                bundles.append(GeneratedBundle(group, (GeneratedFile(group, source=files[group], source_root=root),), False))
+                bundles.append(GeneratedBundle(group, (GeneratedFile(group, source=files[group], source_root=exports),), False))
             else:
-                entries = tuple(GeneratedFile(key[len(group) + 1:], source=file, source_root=root)
+                entries = tuple(GeneratedFile(key[len(group) + 1:], source=file, source_root=exports)
                                 for key, file in sorted(files.items()) if key.startswith(group + "/"))
                 if entries:
                     bundles.append(GeneratedBundle(group, entries, True))

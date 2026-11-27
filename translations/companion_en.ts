@@ -690,5 +690,163 @@ Reasoning: {effort_label}</translation>
       <source>Image indisponible · ouvrir le lien</source>
       <translation>Image unavailable · open link</translation>
     </message>
+    <message>
+      <source>Aucune discussion enregistrée.</source>
+      <translation>No saved conversations.</translation>
+    </message>
+    <message>
+      <source>Créée le</source>
+      <translation>Created</translation>
+    </message>
+    <message>
+      <source>Discussion</source>
+      <translation>Conversation</translation>
+    </message>
+    <message>
+      <source>Erreur d’historique : {error}</source>
+      <translation>History error: {error}</translation>
+    </message>
+    <message>
+      <source>Historique des discussions</source>
+      <translation>Conversation history</translation>
+    </message>
+    <message>
+      <source>Impossible de préparer le transfert vers Codex.
+{error}</source>
+      <translation>Could not prepare the conversation for Codex.
+{error}</translation>
+    </message>
+    <message>
+      <source>Impossible de restaurer la discussion.
+{error}</source>
+      <translation>Could not restore the conversation.
+{error}</translation>
+    </message>
+    <message>
+      <source>Impossible de supprimer certaines discussions.
+{error}</source>
+      <translation>Could not delete some conversations.
+{error}</translation>
+    </message>
+    <message>
+      <source>Impossible d’ouvrir l’application Codex.</source>
+      <translation>Could not open the Codex app.</translation>
+    </message>
+    <message>
+      <source>Lis discussion-companion.json pour reprendre la discussion de Companion et utiliser ses fichiers si nécessaire.</source>
+      <translation>Read discussion-companion.json to continue the Companion conversation and use its files as needed.</translation>
+    </message>
+    <message>
+      <source>Restaurer</source>
+      <translation>Restore</translation>
+    </message>
+    <message>
+      <source>Réponse interrompue</source>
+      <translation>Response interrupted</translation>
+    </message>
+    <message>
+      <source>Supprimer la discussion et ses fichiers de l’historique ?</source>
+      <translation>Delete this conversation and its files from history?</translation>
+    </message>
+    <message>
+      <source>Supprimer la sélection…</source>
+      <translation>Delete selected…</translation>
+    </message>
+    <message>
+      <source>Supprimer les {count} discussions sélectionnées et leurs fichiers de l’historique ?</source>
+      <translation>Delete the {count} selected conversations and their files from history?</translation>
+    </message>
+    <message>
+      <source>Supprimer toutes les discussions et leurs fichiers de l’historique ?</source>
+      <translation>Delete all conversations and their files from history?</translation>
+    </message>
+    <message>
+      <source>Sélection</source>
+      <translation>Select</translation>
+    </message>
+    <message>
+      <source>Tout supprimer…</source>
+      <translation>Delete all…</translation>
+    </message>
+    <message>
+      <source>Transmettre à Codex</source>
+      <translation>Send to Codex</translation>
+    </message>
+    <message>
+      <source>Connecté</source>
+      <translation>Connected</translation>
+    </message>
+    <message>
+      <source>Faible</source>
+      <translation>Low</translation>
+    </message>
+    <message>
+      <source>{caption}  ▾</source>
+      <translation>{caption}  ▾</translation>
+    </message>
+    <message>
+      <source>{model_label} · {effort_label}</source>
+      <translation>{model_label} · {effort_label}</translation>
+    </message>
+    <message>
+      <source>Compte ChatGPT</source>
+      <translation>ChatGPT account</translation>
+    </message>
+    <message>
+      <source>Chargement des quotas…</source>
+      <translation>Loading usage limits…</translation>
+    </message>
+    <message>
+      <source>Crédits illimités</source>
+      <translation>Unlimited credits</translation>
+    </message>
+    <message>
+      <source>{balance} crédits restants</source>
+      <translation>{balance} credits remaining</translation>
+    </message>
+    <message>
+      <source>Quota principal</source>
+      <translation>Primary limit</translation>
+    </message>
+    <message>
+      <source>Quota secondaire</source>
+      <translation>Secondary limit</translation>
+    </message>
+    <message>
+      <source>Quotas Codex</source>
+      <translation>Codex usage limits</translation>
+    </message>
+    <message>
+      <source>Quotas indisponibles</source>
+      <translation>Usage limits unavailable</translation>
+    </message>
+    <message>
+      <source>{bucket} · {window}</source>
+      <translation>{bucket} · {window}</translation>
+    </message>
+    <message>
+      <source>{count} h</source>
+      <translation>{count} h</translation>
+    </message>
+    <message>
+      <source>{count} j</source>
+      <translation>{count} d</translation>
+    </message>
+    <message>
+      <source>{count} min</source>
+      <translation>{count} min</translation>
+    </message>
+    <message>
+      <source>{identity} · {plan}</source>
+      <translation>{identity} · {plan}</translation>
+    </message>
+    <message>
+      <source>{quota} · Réinitialisation le {reset}</source>
+      <translation>{quota} · Resets {reset}</translation>
+    </message>
+    <message>
+      <source>{window} · {remaining} % restants</source>
+      <translation>{window} · {remaining}% remaining</translation>
+    </message>
   </context>
 </TS>
