@@ -19,7 +19,7 @@ Built with Python and PySide6, it connects to the standalone Codex app-server vi
 ## Runtime
 
 - Markdown chat with image previews and image, PDF, DOCX, and text attachments.
-- Local JSON history with streamed response checkpoints and archived files. Restoring a chat seeds a new Codex thread with the saved context.
+- Searchable local JSON history with dated chat branches, one row per exchange, and archived files. Restoring a chat seeds a new Codex thread with the saved context.
 - Per-chat workspace with `inputs/` for originals and `exports/` for generated files. Codex turns use `workspace-write`.
 - Account, model, and reasoning controls below the composer. The account menu reads remaining quotas and reset times via `account/rateLimits/read`.
 - **Send to Codex** opens a desktop chat draft with a reference to the local transcript and files.

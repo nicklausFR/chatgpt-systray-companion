@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
@@ -101,6 +102,14 @@ class HistoryWindowTests(unittest.TestCase):
         window._turn_finished("completed", "")
         return window._history_chat.path.name
 
+    def _filter_history(self, dialog, query):
+        dialog.search.setText(query)
+        for _ in range(120):
+            if dialog.entries.isEnabled():
+                return
+            QTest.qWait(25)
+        self.fail("History search did not finish")
+
     def test_selecting_an_entry_restores_the_main_window_and_continues_with_context(self):
         reply = "[Fichier](./exports/m%C3%AAme%20fichier.bin)"
         key = self._send("Première question", reply, b"first")
@@ -109,15 +118,22 @@ class HistoryWindowTests(unittest.TestCase):
         self.window = self._window()
         dialog = app.HistoryDialog(self.window)
         dialog.show()
-        item = dialog.entries.topLevelItem(0)
-        self.assertEqual(item.data(0, Qt.UserRole), key)
-        self.assertTrue(item.text(2))
-        point = QPoint(dialog.entries.columnViewportPosition(1) + 20, dialog.entries.visualItemRect(item).center().y())
+        origin = dialog.entries.topLevelItem(0)
+        self.assertEqual(origin.data(0, Qt.UserRole), key)
+        self.assertTrue(origin.text(0))
+        self.assertEqual([origin.child(index).text(0) for index in range(origin.childCount())],
+                         ["Première question", "Deuxième question"])
+        item = origin.child(0)
+        point = QPoint(dialog.entries.columnViewportPosition(0) + 90, dialog.entries.visualItemRect(item).center().y())
         QTest.mouseClick(dialog.entries.viewport(), Qt.LeftButton, pos=point)
         self.assertEqual(dialog.result(), QDialog.Accepted)
         self.assertIn("Première question", self.window.transcript.toPlainText())
         self.assertIn("Deuxième question", self.window.transcript.toPlainText())
         transcript = self.window.transcript
+        target = transcript.textCursor().currentFrame().frameFormat()
+        self.assertEqual(target.property(app.HISTORY_TURN_PROPERTY), "00000001")
+        self.assertTrue(target.property(app.QTextFormat.UserProperty))
+        self.assertEqual(transcript.textCursor().block().text(), "Première question")
         saved = []
         for frame in transcript.document().rootFrame().childFrames():
             keys = frame.frameFormat().property(app.RESPONSE_EXPORTS_PROPERTY)
@@ -142,16 +158,76 @@ class HistoryWindowTests(unittest.TestCase):
             self.window.client._thread_response({"thread": {"id": "fixture"}})
         dialog = app.HistoryDialog(self.window)
         with patch.object(QMessageBox, "question", return_value=QMessageBox.Yes):
-            dialog.entries.topLevelItem(0).setCheckState(0, Qt.Checked)
+            dialog.entries.topLevelItem(0).setCheckState(1, Qt.Checked)
             dialog.remove.click()
             self.assertEqual(dialog.entries.topLevelItemCount(), 3)
             for index in (0, 2):
-                dialog.entries.topLevelItem(index).setCheckState(0, Qt.Checked)
+                dialog.entries.topLevelItem(index).setCheckState(1, Qt.Checked)
             dialog.remove.click()
             self.assertEqual(dialog.entries.topLevelItemCount(), 1)
             dialog.remove_all.click()
         self.assertFalse(self.window.history.entries())
         self.assertTrue(all(not (self.window.history.root / key).exists() for key in keys))
+
+    def test_history_search_filters_exchanges_and_restores_a_match_from_the_reply(self):
+        key = self._send("Prépare le bilan.", "Le budget de l’école est validé.")
+        self._send("Quel est le prochain jalon ?", "Le lancement aura lieu lundi.")
+        self.window._new_chat()
+        self.window.client._thread_response({"thread": {"id": "other"}})
+        self._send("Liste les tâches.", "Voici les tâches restantes.")
+        dialog = app.HistoryDialog(self.window)
+        dialog.show()
+        self.assertEqual(dialog.entries.topLevelItemCount(), 2)
+
+        self._filter_history(dialog, "introuvable")
+        self.assertEqual(dialog.entries.topLevelItemCount(), 0)
+        self.assertEqual(dialog.empty.text(), "Aucun résultat.")
+        self._filter_history(dialog, "")
+        self.assertEqual(dialog.entries.topLevelItemCount(), 2)
+
+        self._filter_history(dialog, "BILAN ECOLE")
+        self.assertEqual(dialog.entries.topLevelItemCount(), 1)
+        branch = dialog.entries.topLevelItem(0)
+        self.assertEqual(branch.data(0, Qt.UserRole), key)
+        self.assertEqual(branch.childCount(), 1)
+        question = branch.child(0)
+        self.assertEqual(question.text(0), "Prépare le bilan.")
+        point = QPoint(90, dialog.entries.visualItemRect(question).center().y())
+        QTest.mouseClick(dialog.entries.viewport(), Qt.LeftButton, pos=point)
+        self.assertEqual(dialog.result(), QDialog.Accepted)
+        self.assertEqual(self.window.transcript.textCursor().block().text(), "Prépare le bilan.")
+        self.assertIn("Le budget de l’école est validé.", self.window.transcript.toPlainText())
+
+    def test_delete_all_still_includes_conversations_hidden_by_search(self):
+        self._send("Premier sujet", "Contient un mot rare.")
+        self.window._new_chat()
+        self.window.client._thread_response({"thread": {"id": "other"}})
+        self._send("Second sujet", "Autre réponse.")
+        dialog = app.HistoryDialog(self.window)
+        self._filter_history(dialog, "mot rare")
+        self.assertEqual(dialog.entries.topLevelItemCount(), 1)
+        with patch.object(QMessageBox, "question", return_value=QMessageBox.Yes):
+            dialog.remove_all.click()
+        self.assertFalse(self.window.history.entries())
+
+    def test_new_chat_and_restart_add_distinct_origins_dated_before_the_first_message(self):
+        first_start = self.window._chat_started_at
+        first = self._send("Premier démarrage", "Première réponse")
+        new_chat_start = first_start + timedelta(minutes=1)
+        with patch.object(app, "datetime") as clock:
+            clock.now.return_value = new_chat_start
+            self.window._new_chat()
+        self.window.client._thread_response({"thread": {"id": "new"}})
+        second = self._send("Nouvelle discussion", "Nouvelle réponse")
+        self.window._shutdown()
+        restart = new_chat_start + timedelta(minutes=1)
+        with patch.object(app, "datetime") as clock:
+            clock.now.return_value = restart
+            self.window = self._window()
+        third = self._send("Deuxième démarrage", "Réponse après redémarrage")
+        entries = self.window.history.entries()
+        self.assertEqual([entry.key for entry in entries], [third, second, first])
+        self.assertEqual([entry.created for entry in entries], [restart, new_chat_start, first_start])
 
     def test_context_action_opens_codex_with_a_draft_pointing_to_the_full_transcript(self):
         self._send("Question & réponse", "Réponse Markdown", b"artifact")

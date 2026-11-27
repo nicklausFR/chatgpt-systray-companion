@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Event
+from unicodedata import combining, normalize
 from uuid import UUID, uuid4
 
 from PySide6.QtCore import QIODevice, QLockFile, QSaveFile
@@ -22,6 +24,31 @@ class HistoryEntry:
     key: str
     title: str
     created: datetime
+
+
+@dataclass(frozen=True)
+class HistoryExchange:
+    key: str
+    prompt: str
+
+
+def prompt_preview(data: dict) -> str:
+    return " ".join(data["prompt"][:500].split()) or attachment_names(data)
+
+
+def attachment_names(data: dict) -> str:
+    attachments = data.get("attachments")
+    if not isinstance(attachments, list):
+        return ""
+    return ", ".join(item[0] for item in attachments
+                     if isinstance(item, list) and item and isinstance(item[0], str))
+
+
+def search_text(value: str) -> str:
+    folded = value.casefold()
+    if folded.isascii():
+        return folded
+    return "".join(char for char in normalize("NFKD", folded) if not combining(char))
 
 
 def write_bytes(path: Path, chunks: Iterable[bytes]) -> None:
@@ -97,7 +124,7 @@ class HistoryTurn:
 
 
 class HistoryChat:
-    def __init__(self, path: Path, lock: QLockFile):
+    def __init__(self, path: Path, lock: QLockFile, created: datetime | None = None):
         self.path = path
         self.workspace = path / "workspace"
         self.lock = lock
@@ -105,11 +132,15 @@ class HistoryChat:
         for journal in sorted((path / "turns").glob("*/turn.json")):
             data = json.loads(journal.read_text(encoding="utf-8"))
             self.turns.append(HistoryTurn(journal.parent, self.workspace / "exports", data))
+        if self.turns:
+            first = self.turns[0].data
+            created = datetime.fromisoformat(first.get("chat_created") or first["created"])
+        self.created = created or datetime.now(timezone.utc)
 
     def begin(self, prompt: str, attachments: list[Attachment]) -> HistoryTurn:
         exports = self.workspace / "exports"
         turn = HistoryTurn(self.path / "turns" / f"{len(self.turns) + 1:08d}", exports, {})
-        turn._save({
+        data = {
             "created": datetime.now(timezone.utc).isoformat(),
             "prompt": prompt,
             "attachments": [(attachment.name, str(attachment.detail)) for attachment in attachments],
@@ -118,7 +149,10 @@ class HistoryChat:
             "error": "",
             "finalized": False,
             "before": ArtifactWorkspace.signatures(ArtifactWorkspace.files(exports)),
-        })
+        }
+        if not self.turns:
+            data["chat_created"] = self.created.isoformat()
+        turn._save(data)
         self.turns.append(turn)
         return turn
 
@@ -162,13 +196,50 @@ class ConversationHistory:
                 if UUID(key).hex != key or path.resolve() != path:
                     continue
                 data = json.loads(path.read_text(encoding="utf-8"))
-                title = " ".join(data["prompt"].split()) or ", ".join(name for name, _detail in data["attachments"])
-                entries.append(HistoryEntry(key, title, datetime.fromisoformat(data["created"])))
-            except (OSError, ValueError, KeyError):
+                if not isinstance(data, dict) or not isinstance(data.get("prompt"), str):
+                    continue
+                created = datetime.fromisoformat(data.get("chat_created") or data["created"])
+                entries.append(HistoryEntry(key, prompt_preview(data), created))
+            except (OSError, ValueError, KeyError, TypeError):
                 continue
         return sorted(entries, key=lambda entry: entry.created, reverse=True)
 
-    def open(self, key: str | None = None) -> HistoryChat:
+    def exchanges(self, key: str) -> list[HistoryExchange]:
+        return [HistoryExchange(turn, prompt_preview(data)) for turn, data in self._exchange_records(key)]
+
+    def search(self, query: str, cancelled: Event) -> list[tuple[HistoryEntry, list[HistoryExchange]]]:
+        terms = search_text(query).split()
+        results = []
+        for entry in self.entries():
+            if cancelled.is_set():
+                break
+            matches = []
+            for turn, data in self._exchange_records(entry.key):
+                if cancelled.is_set():
+                    return results
+                response = data.get("response")
+                text = search_text("\n".join((data["prompt"], response if isinstance(response, str) else "", attachment_names(data))))
+                if all(term in text for term in terms):
+                    matches.append(HistoryExchange(turn, prompt_preview(data)))
+            if matches:
+                results.append((entry, matches))
+        return results
+
+    def _exchange_records(self, key: str) -> Iterator[tuple[str, dict]]:
+        if UUID(key).hex != key:
+            raise ValueError(key)
+        for journal in sorted((self.root / key / "turns").glob("*/turn.json")):
+            try:
+                if journal.resolve() != journal:
+                    continue
+                data = json.loads(journal.read_text(encoding="utf-8"))
+                if not isinstance(data, dict) or not isinstance(data.get("prompt"), str):
+                    continue
+            except (OSError, ValueError):
+                continue
+            yield journal.parent.name, data
+
+    def open(self, key: str | None = None, *, created: datetime | None = None) -> HistoryChat:
         self.root.mkdir(parents=True, exist_ok=True)
         restoring = key is not None
         key = key if restoring else uuid4().hex
@@ -184,7 +255,7 @@ class ConversationHistory:
         try:
             if restoring and not path.is_dir():
                 raise FileNotFoundError(str(path))
-            chat = HistoryChat(path, lock)
+            chat = HistoryChat(path, lock, created)
         except Exception:
             lock.unlock()
             raise

@@ -94,7 +94,8 @@ class UiPreferencesTests(unittest.TestCase):
         self.assertEqual(window._assistant_text, "Réponse en cours, à conserver")
         self.assertEqual(window.client.thread_id, "same-thread")
         self.assertTrue(window._busy)
-        self.assertIn("You\nQuestion en français", window.transcript.toPlainText())
+        self.assertIn("Question en français", window.transcript.toPlainText())
+        self.assertNotIn("You\n", window.transcript.toPlainText())
         self.assertIn("print('Vous')", window.transcript.toPlainText())
         response = next(frame for frame in window.transcript.document().rootFrame().childFrames()
                         if frame.frameFormat().hasProperty(app.RESPONSE_MARKDOWN_PROPERTY))
@@ -105,7 +106,8 @@ class UiPreferencesTests(unittest.TestCase):
         self.assertEqual(window.quota_actions[0].text(), "5 h · 70 % restants")
         self.assertEqual(window.model_button.text(), "Fixture · Faible  ▾")
         self.assertEqual(window.status_label.text(), "Réponse en cours…")
-        self.assertIn("Vous\nQuestion en français", window.transcript.toPlainText())
+        self.assertIn("Question en français", window.transcript.toPlainText())
+        self.assertNotIn("Vous\n", window.transcript.toPlainText())
 
     def test_setup_dialog_attachment_and_standard_qt_actions_follow_language(self):
         window = self.window

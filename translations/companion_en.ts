@@ -848,5 +848,21 @@ Reasoning: {effort_label}</translation>
       <source>{window} · {remaining} % restants</source>
       <translation>{window} · {remaining}% remaining</translation>
     </message>
+    <message>
+      <source>Échanges</source>
+      <translation>Messages</translation>
+    </message>
+    <message>
+      <source>Rechercher dans l’historique…</source>
+      <translation>Search history…</translation>
+    </message>
+    <message>
+      <source>Recherche…</source>
+      <translation>Searching…</translation>
+    </message>
+    <message>
+      <source>Aucun résultat.</source>
+      <translation>No results.</translation>
+    </message>
   </context>
 </TS>

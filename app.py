@@ -10,14 +10,16 @@ import platform
 import shutil
 import sys
 from collections.abc import Callable
+from datetime import datetime, timezone
 from math import ceil, cos, pi, sin
 from pathlib import Path
+from threading import Event
 from time import monotonic
 from typing import Any
 from urllib.parse import quote, urlencode
 from uuid import uuid4
 
-from PySide6.QtCore import QCoreApplication, QDateTime, QEvent, QLocale, QPoint, QPointF, QProcess, QProcessEnvironment, QRectF, QSettings, QSignalBlocker, QSize, QStandardPaths, QThreadPool, QTimer, Qt, QUrl, Signal
+from PySide6.QtCore import QCoreApplication, QDateTime, QEvent, QLocale, QObject, QPoint, QPointF, QProcess, QProcessEnvironment, QRectF, QRunnable, QSettings, QSignalBlocker, QSize, QStandardPaths, QThreadPool, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QActionGroup,
@@ -53,6 +55,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
@@ -79,7 +82,7 @@ from PySide6.QtWidgets import (
 from attachments import Attachment, AttachmentLoader, AttachmentRow, attachment_badge, local_paths_from_mime, local_paths_from_text
 from artifact_workspace import ArtifactWorkspace
 from codex_check import CodexProbe
-from conversation_history import ConversationHistory, HistoryChat, HistoryTurn, write_bytes
+from conversation_history import ConversationHistory, HistoryChat, HistoryEntry, HistoryExchange, HistoryTurn, write_bytes
 from generated_files import GeneratedBundle, GeneratedFile, parse_response, save_file, save_folder, save_zip
 from scroll_fade import ScrollFade
 
@@ -93,6 +96,7 @@ SIDEBAR_WIDTH = 48
 RESPONSE_LEFT_MARGIN = 12
 RESPONSE_MARKDOWN_PROPERTY = QTextFormat.UserProperty + 1
 RESPONSE_EXPORTS_PROPERTY = QTextFormat.UserProperty + 2
+HISTORY_TURN_PROPERTY = QTextFormat.UserProperty + 3
 RESPONSE_COPY_FOOTER = 30
 EFFORT_LABELS = {
     "none": tr("Sans réflexion"),
@@ -1419,6 +1423,24 @@ class AppServerClient(QProcess):
             self._setup_failed(tr('Codex s’est arrêté (code {exit_code}). Réessayez ou vérifiez son installation.').format(exit_code=exit_code))
 
 
+class HistorySearchSignals(QObject):
+    finished = Signal(object, list)
+
+
+class HistorySearchJob(QRunnable):
+    def __init__(self, history: ConversationHistory, query: str, cancelled: Event):
+        super().__init__()
+        self.history = history
+        self.query = query
+        self.cancelled = cancelled
+        self.signals = HistorySearchSignals()
+
+    def run(self) -> None:
+        matches = self.history.search(self.query, self.cancelled)
+        if not self.cancelled.is_set():
+            self.signals.finished.emit(self.cancelled, matches)
+
+
 class HistoryDialog(QDialog):
     def __init__(self, window: MainWindow):
         super().__init__(window)
@@ -1426,14 +1448,44 @@ class HistoryDialog(QDialog):
         ui_text(self, "setWindowTitle", tr("Historique des discussions"))
         self.resize(660, 380)
         layout = QVBoxLayout(self)
+        self.search = ui_text(QLineEdit(), "setPlaceholderText", tr("Rechercher dans l’historique…"))
+        ui_text(self.search, "setAccessibleName", tr("Rechercher dans l’historique…"))
+        self.search.setClearButtonEnabled(True)
+        themed_stylesheet(self.search, """
+            QLineEdit {
+                background: #202020;
+                color: #ededed;
+                border: 1px solid #505050;
+                border-radius: 5px;
+                padding: 6px 8px;
+            }
+            QLineEdit:focus { border-color: #858585; }
+        """)
+        layout.addWidget(self.search)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(180)
+        self._search_timer.timeout.connect(self._run_search)
+        self._search_cancelled: Event | None = None
+        self.finished.connect(self._cancel_search)
         self.entries = QTreeWidget()
-        self.entries.setRootIsDecorated(False)
         self.entries.setUniformRowHeights(True)
-        self.entries.setHeaderLabels([str(tr("Sélection")), str(tr("Discussion")), str(tr("Créée le"))])
+        self.entries.setExpandsOnDoubleClick(False)
+        self.entries.setHeaderLabels([str(tr("Échanges")), str(tr("Sélection"))])
+        themed_stylesheet(self.entries, """
+            QTreeWidget::indicator {
+                width: 12px;
+                height: 12px;
+                border: 1px solid #777777;
+                border-radius: 2px;
+                background: #333333;
+            }
+            QTreeWidget::indicator:hover { border-color: #b4b4b4; }
+            QTreeWidget::indicator:checked { background: #a8c7fa; border-color: #a8c7fa; }
+        """)
         header = self.entries.header()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setStretchLastSection(False)
         layout.addWidget(self.entries)
         self.empty = ui_text(QLabel(), "setText", tr("Aucune discussion enregistrée."))
@@ -1442,56 +1494,135 @@ class HistoryDialog(QDialog):
         self.restore = ui_text(buttons.addButton("", QDialogButtonBox.ActionRole), "setText", tr("Restaurer"))
         self.remove = ui_text(buttons.addButton("", QDialogButtonBox.ActionRole), "setText", tr("Supprimer la sélection…"))
         self.remove_all = ui_text(buttons.addButton("", QDialogButtonBox.ActionRole), "setText", tr("Tout supprimer…"))
+        for button in buttons.buttons():
+            button.setAutoDefault(False)
         layout.addWidget(buttons)
         buttons.rejected.connect(self.reject)
         self.restore.clicked.connect(lambda: self._restore(self.entries.currentItem()))
-        self.remove.clicked.connect(lambda: self._delete(self._checked()))
-        self.remove_all.clicked.connect(lambda: self._delete(self._items(), all_chats=True))
-        self.entries.itemClicked.connect(lambda item, column: self._restore(item) if column else None)
-        self.entries.itemActivated.connect(lambda item, column: self._restore(item) if column else None)
+        self.remove.clicked.connect(lambda: self._delete())
+        self.remove_all.clicked.connect(lambda: self._delete(all_chats=True))
+        self.entries.itemClicked.connect(self._item_clicked)
+        self.entries.itemActivated.connect(lambda item, column: self._restore(item) if column == 0 else None)
+        self.entries.itemExpanded.connect(self._load_exchanges)
         self.entries.itemChanged.connect(self._update_actions)
         self.entries.itemSelectionChanged.connect(self._update_actions)
+        self.search.textChanged.connect(self.refresh)
         self.refresh()
+        self.search.setFocus()
 
     def _items(self) -> list[QTreeWidgetItem]:
         return [self.entries.topLevelItem(i) for i in range(self.entries.topLevelItemCount())]
 
     def _checked(self) -> list[QTreeWidgetItem]:
-        return [item for item in self._items() if item.checkState(0) == Qt.Checked]
+        return [item for item in self._items() if item.checkState(1) == Qt.Checked]
 
     def refresh(self) -> None:
-        self.entries.clear()
-        for entry in self.window.history.entries():
-            created = QDateTime.fromMSecsSinceEpoch(int(entry.created.timestamp() * 1000))
-            date = QLocale().toString(created, QLocale.ShortFormat)
-            item = QTreeWidgetItem(["", entry.title[:160] or str(tr("Discussion")), date])
-            item.setData(0, Qt.UserRole, entry.key)
-            item.setToolTip(1, entry.title[:500])
-            item.setCheckState(0, Qt.Unchecked)
-            self.entries.addTopLevelItem(item)
-        self.empty.setVisible(not self._items())
+        self._cancel_search()
+        if not self.search.text().strip():
+            self._show_entries([(entry, None) for entry in self.window.history.entries()])
+            return
+        self.entries.setEnabled(False)
+        ui_text(self.empty, "setText", tr("Recherche…"))
+        self.empty.show()
+        self._search_timer.start()
         self._update_actions()
 
+    def _cancel_search(self) -> None:
+        self._search_timer.stop()
+        if self._search_cancelled is not None:
+            self._search_cancelled.set()
+            self._search_cancelled = None
+
+    def _run_search(self) -> None:
+        self._search_cancelled = Event()
+        job = HistorySearchJob(self.window.history, self.search.text().strip(), self._search_cancelled)
+        job.signals.finished.connect(self._search_finished, Qt.QueuedConnection)
+        QThreadPool.globalInstance().start(job)
+
+    def _search_finished(self, cancelled: Event, rows: list[tuple[HistoryEntry, list[HistoryExchange]]]) -> None:
+        if self._search_cancelled is cancelled:
+            self._search_cancelled = None
+            self._show_entries(rows, filtered=True)
+
+    def _show_entries(self, rows: list[tuple[HistoryEntry, list[HistoryExchange] | None]], *, filtered: bool = False) -> None:
+        checked = {item.data(0, Qt.UserRole) for item in self._checked()}
+        with QSignalBlocker(self.entries):
+            self.entries.clear()
+            for entry, exchanges in rows:
+                created = QDateTime.fromMSecsSinceEpoch(int(entry.created.timestamp() * 1000)).toLocalTime()
+                date = QLocale().toString(created.date(), QLocale.ShortFormat)
+                item = QTreeWidgetItem([f"{date} · {created.toString('HH:mm:ss')}"])
+                item.setData(0, Qt.UserRole, entry.key)
+                item.setToolTip(0, entry.title)
+                item.setCheckState(1, Qt.Checked if entry.key in checked else Qt.Unchecked)
+                font = item.font(0)
+                font.setBold(True)
+                item.setFont(0, font)
+                self.entries.addTopLevelItem(item)
+                if exchanges is None:
+                    item.setChildIndicatorPolicy(QTreeWidgetItem.ShowIndicator)
+                else:
+                    self._add_exchanges(item, exchanges)
+                    item.setExpanded(True)
+        first = self.entries.topLevelItem(0)
+        if first is not None and not filtered:
+            first.setExpanded(True)
+        self.entries.setEnabled(True)
+        ui_text(self.empty, "setText", tr("Aucun résultat.") if filtered else tr("Aucune discussion enregistrée."))
+        self.empty.setVisible(first is None)
+        self._update_actions()
+
+    def _load_exchanges(self, item: QTreeWidgetItem) -> None:
+        if item.parent() is not None or item.childCount():
+            return
+        self._add_exchanges(item, self.window.history.exchanges(item.data(0, Qt.UserRole)))
+        item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicatorWhenChildless)
+
+    @staticmethod
+    def _add_exchanges(item: QTreeWidgetItem, exchanges: list[HistoryExchange]) -> None:
+        for exchange in exchanges:
+            child = QTreeWidgetItem([exchange.prompt])
+            child.setData(0, Qt.UserRole, exchange.key)
+            child.setToolTip(0, exchange.prompt[:500])
+            item.addChild(child)
+
+    def _item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        if column != 0:
+            return
+        if item.parent() is None:
+            item.setExpanded(not item.isExpanded())
+        else:
+            self._restore(item)
+
     def _update_actions(self) -> None:
-        idle = not (self.window._busy or self.window.client._starting_thread)
+        idle = self.entries.isEnabled() and not (self.window._busy or self.window.client._starting_thread)
         self.restore.setEnabled(idle and self.entries.currentItem() is not None)
         self.remove.setEnabled(idle and bool(self._checked()))
         self.remove_all.setEnabled(idle and bool(self._items()))
 
     def _restore(self, item: QTreeWidgetItem | None) -> None:
-        if item is not None and not self.window._busy and self.window._restore_chat(item.data(0, Qt.UserRole)):
+        if item is None:
+            return
+        parent = item.parent()
+        origin = parent if parent is not None else item
+        turn = item.data(0, Qt.UserRole) if parent is not None else None
+        if self.window._restore_chat(origin.data(0, Qt.UserRole), turn):
             self.accept()
 
-    def _delete(self, items: list[QTreeWidgetItem], *, all_chats: bool = False) -> None:
-        if self.window._busy or self.window.client._starting_thread or not items:
+    def _delete(self, *, all_chats: bool = False) -> None:
+        if not self.entries.isEnabled() or self.window._busy or self.window.client._starting_thread:
+            return
+        keys = ([entry.key for entry in self.window.history.entries()] if all_chats else
+                [item.data(0, Qt.UserRole) for item in self._checked()])
+        if not keys:
             return
         prompt = tr("Supprimer toutes les discussions et leurs fichiers de l’historique ?") if all_chats else (
-            tr("Supprimer la discussion et ses fichiers de l’historique ?") if len(items) == 1 else
-            tr("Supprimer les {count} discussions sélectionnées et leurs fichiers de l’historique ?").format(count=len(items))
+            tr("Supprimer la discussion et ses fichiers de l’historique ?") if len(keys) == 1 else
+            tr("Supprimer les {count} discussions sélectionnées et leurs fichiers de l’historique ?").format(count=len(keys))
         )
         if QMessageBox.question(self, self.windowTitle(), str(prompt), QMessageBox.Yes | QMessageBox.No,
                                 QMessageBox.No) == QMessageBox.Yes:
-            self.window._delete_chats([item.data(0, Qt.UserRole) for item in items])
+            self.window._delete_chats(keys)
             self.refresh()
 
 
@@ -1507,6 +1638,7 @@ class MainWindow(QMainWindow):
                 directory = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
                 history_directory = Path(directory) / "history"
         self.history = ConversationHistory(history_directory)
+        self._chat_started_at = datetime.now(timezone.utc)
         self._history_chat: HistoryChat | None = None
         self._history_turn: HistoryTurn | None = None
         self._history_timer = QTimer(self)
@@ -2686,6 +2818,7 @@ class MainWindow(QMainWindow):
         self.client.new_thread()
 
     def _reset_chat_view(self) -> None:
+        self._chat_started_at = datetime.now(timezone.utc)
         self._clear_attachments()
         self._response_height = 0
         self.transcript.clear()
@@ -2699,7 +2832,7 @@ class MainWindow(QMainWindow):
     def _history_workspace(self) -> Path | None:
         try:
             if self._history_chat is None:
-                self._history_chat = self.history.open()
+                self._history_chat = self.history.open(created=self._chat_started_at)
             chat = self._history_chat
             chat.recover()
             self.client.resume_context = chat.context()
@@ -2727,10 +2860,11 @@ class MainWindow(QMainWindow):
         dialog.exec()
         dialog.deleteLater()
 
-    def _restore_chat(self, key: str) -> bool:
+    def _restore_chat(self, key: str, turn_key: str | None = None) -> bool:
         if self._busy or self.client._starting_thread:
             return False
         if self._history_chat is not None and self._history_chat.path.name == key:
+            self._reveal_history_message(turn_key)
             return True
         chat = None
         try:
@@ -2746,7 +2880,8 @@ class MainWindow(QMainWindow):
         self._history_chat = chat
         for turn in chat.turns:
             data = turn.data
-            self._append_message(tr("Vous"), data["prompt"], QColor(ui_color("#a8abb1")), turn.attachments())
+            self._append_message("Vous", data["prompt"], QColor(ui_color("#a8abb1")), turn.attachments(),
+                                 turn_key=turn.path.name)
             self._assistant_text = data["response"]
             self._render_assistant_message(turn.bundles(), turn.exports)
             self._render_turn_status(data["status"], data["error"])
@@ -2754,7 +2889,18 @@ class MainWindow(QMainWindow):
         self._fit_window()
         if self.client.thread_id or self.client._startup_complete:
             self.client.new_thread()
+        self._reveal_history_message(turn_key)
         return True
+
+    def _reveal_history_message(self, turn_key: str | None) -> None:
+        if turn_key is None:
+            return
+        frames = self.transcript.document().rootFrame().childFrames()
+        for frame in frames:
+            if frame.frameFormat().property(HISTORY_TURN_PROPERTY) == turn_key:
+                self.transcript.setTextCursor(frame.firstCursorPosition())
+                self.transcript.ensureCursorVisible()
+                return
 
     def _delete_chats(self, keys: list[str]) -> None:
         if self._busy or self.client._starting_thread:
@@ -2830,12 +2976,14 @@ class MainWindow(QMainWindow):
                 self._warn_history(error)
         self._send_after_prepare = False
         self.input.clear()
-        self._append_message(tr("Vous"), text, QColor(ui_color("#a8abb1")), attachments)
+        turn_key = self._history_turn.path.name if self._history_turn is not None else None
+        self._append_message("Vous", text, QColor(ui_color("#a8abb1")), attachments, turn_key=turn_key)
         self._clear_attachments()
         self._set_busy(True)
         self.client.send_message(text, attachments)
 
-    def _append_message(self, role: str, text: str, color: QColor, attachments: list[Attachment] | None = None) -> int:
+    def _append_message(self, role: str, text: str, color: QColor, attachments: list[Attachment] | None = None,
+                        *, turn_key: str | None = None) -> int:
         role = getattr(role, "source", role)
         updates_enabled = self.transcript.updatesEnabled()
         self.transcript.setUpdatesEnabled(False)
@@ -2851,6 +2999,8 @@ class MainWindow(QMainWindow):
                 question_format.setBorderBrush(QColor(ui_color("#505050")))
                 question_format.setBorderStyle(QTextFrameFormat.BorderStyle_Solid)
                 question_format.setProperty(QTextFormat.UserProperty, True)
+                if turn_key is not None:
+                    question_format.setProperty(HISTORY_TURN_PROPERTY, turn_key)
                 question_format.setPadding(RESPONSE_LEFT_MARGIN - 1)
                 question_format.setBottomMargin(8)
                 question_format.setWidth(QTextLength(QTextLength.PercentageLength, 100))
@@ -2863,7 +3013,7 @@ class MainWindow(QMainWindow):
                 response_format.setLeftMargin(RESPONSE_LEFT_MARGIN)
                 response = cursor.insertFrame(response_format)
                 cursor = response.firstCursorPosition()
-            if role:
+            else:
                 role_format = QTextCharFormat()
                 role_format.setFontWeight(QFont.Bold)
                 role_format.setForeground(color)
